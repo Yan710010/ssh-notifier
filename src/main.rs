@@ -1,9 +1,12 @@
+mod config;
+
+use anyhow::Result;
 use std::{
     io::{BufRead, BufReader},
     process::{Command, Stdio},
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     // 使用子进程从journal读取sshd信息
     let mut journal = Command::new("journalctl")
         .args([
@@ -27,21 +30,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // 获取需要的部分
-        // 例: Accepted publickey for yan from ::1 port 39332 ssh2: ED25519 SHA256:9F4zuuHf3+TUADxbug4BcLQJ/wRLoWFZwU8wYMotqMk
-        // # 考虑到我这没公网, 都是用的frp, 就不判断IP了
-        // byd 直接取最后一段吧
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        let fingerprint = *fields.last().unwrap_or(&"");
+        let info = SSHInfo::parse(&line);
         // TODO: 读取配置文件识别密钥指纹
 
         // 发送有人登录的提示
         let notify = Command::new("notify-send")
             .arg("--urgency=critical")
             .arg("--app-name=ssh-notify")
-            .arg("SSH连接") // Title
-            .arg("有人连上来了喵!") // Message
-            .spawn();
-        // 检测是否发送成功
+            .arg("有人连上来了喵?") // Title
+            .arg(format!(
+                "登录用户:{}\nIP:{}\n指纹:{}",
+                info.user, info.ip, info.fingerprint
+            )) // Message
+            .output();
+        if notify.is_err() || notify.is_ok_and(|o| !o.status.success()) {
+            eprintln!("发送提示失败!");
+        }
     }
+    eprintln!("子进程journalctl关闭, 正在退出");
     Ok(())
+}
+
+/// 储存sshd message 的信息
+#[derive(Debug)]
+struct SSHInfo {
+    pub user: String,
+    pub ip: String,
+    pub fingerprint: String,
+}
+
+impl SSHInfo {
+    pub fn parse(msg: &String) -> SSHInfo {
+        // 例: Accepted publickey for yan from ::1 port 39332 ssh2: ED25519 SHA256:9F4zuuHf3+TUADxbug4BcLQJ/wRLoWFZwU8wYMotqMk
+        // 拆!
+        let extract = |m: &str, s: &str, e: &str| {
+            if let Some(i) = m.find(s) {
+                let rest = &m[i + s.len()..];
+                if let Some(j) = rest.find(e) {
+                    return Some(rest[..j].to_string());
+                }
+            }
+            None
+        };
+        let user = extract(&msg, "for ", " from").unwrap_or("UNKNOWN".into());
+        let ip = extract(&msg, "from ", " port").unwrap_or("UNKNOWN".into());
+        let fingerprint = msg.split_whitespace().last().unwrap_or("NONE").to_string();
+
+        SSHInfo {
+            user,
+            ip,
+            fingerprint,
+        }
+    }
 }
