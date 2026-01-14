@@ -2,6 +2,11 @@ mod config;
 
 use anyhow::Result;
 use anyhow::anyhow;
+use env_logger::Env;
+use log::debug;
+use log::error;
+use log::info;
+use log::warn;
 use std::path::Path;
 use std::{
     io::{BufRead, BufReader},
@@ -11,6 +16,9 @@ use std::{
 use crate::config::{Config, User};
 
 fn main() -> Result<()> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    debug!("Application started");
     // 使用子进程从journal读取sshd信息
     let mut journal = Command::new("journalctl")
         .args([
@@ -25,6 +33,17 @@ fn main() -> Result<()> {
     let mut reader = BufReader::new(output);
 
     let mut line = String::new();
+
+    // Probably mut, for introducing config reloading etc.
+    let config = match Config::load() {
+        Ok(conf) => conf,
+        Err(err) => {
+            error!("{}", err);
+            warn!("Failed to load configuration due to error, fallback to default");
+            Config::default()
+        }
+    };
+
     // 主循环
     loop {
         line.clear();
@@ -32,28 +51,32 @@ fn main() -> Result<()> {
         let length = reader.read_line(&mut line).unwrap();
         // EOF判断
         if length == 0 {
+            info!("End-of-file ocurred, stopping");
             break;
         }
 
+        debug!("Got line from sshd: {}", line);
+
         // 获取连接信息
         let info = SSHInfo::parse(&line);
-        // 读取配置文件识别密钥指纹
-        let logined_user = match Config::load() {
-            Ok(conf) => conf.verify_ssh(&info.fingerprint).unwrap_or_default(),
-            Err(err) => {
-                eprintln!("\x1b[31m{}\x1b[0m",err);
-                config::User::default()
-            }
-        };
+        debug!("Parsed info: {:?}", info);
+        info!(
+            "Logging from {}@{}, fingerprint {}",
+            info.user, info.ip, info.fingerprint
+        );
+
+        // 识别密钥指纹
+        let logined_user = config.verify_ssh(&info.fingerprint).unwrap_or_default();
 
         // 发送有人登录的提示
         notify_send(&logined_user, &info);
+
         // 显示问候语
-        greet(&logined_user.greeting, &info)
-            .map_err(|e| eprintln!("{}", e))
-            .ok();
+        if let Err(e) = greet(&logined_user.greeting, &info) {
+            error!("Error ocurred while greeting: {}", e);
+        }
     }
-    eprintln!("子进程journalctl关闭, 正在退出");
+    info!("子进程journalctl关闭, 正在退出");
     Ok(())
 }
 
@@ -67,7 +90,7 @@ struct SSHInfo {
 }
 
 impl SSHInfo {
-    pub fn parse(msg: &String) -> SSHInfo {
+    pub fn parse(msg: &str) -> SSHInfo {
         // 例: Accepted publickey for yan from ::1 port 39332 ssh2: ED25519 SHA256:9F4zuuHf3+TUADxbug4BcLQJ/wRLoWFZwU8wYMotqMk
         // 拆!
         let extract = |m: &str, s: &str, e: &str| {
@@ -96,8 +119,9 @@ impl SSHInfo {
 /// 发送登录提示
 fn notify_send(user: &User, info: &SSHInfo) {
     if user.no_notify {
-        //return;
+        return;
     }
+
     // 格式化消息文本
     let mut title = "有人连上来了喵?";
     let mut message = format!(
@@ -152,4 +176,23 @@ fn greet(greeting: &str, info: &SSHInfo) -> Result<()> {
         }
     }
     Err(anyhow!("未找到符合的login"))
+}
+
+#[allow(unused)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parsing_sshd_log() {
+        let info = SSHInfo::parse(
+            "Jan 11 23:10:45 HyprOnion sshd-session[31509]: Accepted publickey for yan from 127.0.0.1 port 50178 ssh2: ED25519 SHA256:EjRavL2HEklAJavw5mtARs0LdvhQ+V+ShZ7oDLmjwhs",
+        );
+        assert_eq!(info.user, "yan");
+        assert_eq!(info.ip, "127.0.0.1");
+        assert_eq!(info.pid, "31509");
+        assert_eq!(
+            info.fingerprint,
+            "SHA256:EjRavL2HEklAJavw5mtARs0LdvhQ+V+ShZ7oDLmjwhs"
+        );
+    }
 }
