@@ -168,7 +168,7 @@ fn greet(greeting: &str, info: &SSHInfo) -> Result<()> {
                 "\x1b[s\x1b[4S\x1b[3F", // 保存当前位置 向下滚动(腾出显示空间) 光标上移(达到目标显示位置)
                 "+-----------\n",
                 greeting,
-                "\x1b[u\x1b[4A" // 恢复保存的位置 光标上移(因为之前向下滚动了)
+                "\x1b[u" // 恢复保存的位置 (由于已经向下滚动，所以光标的最终位置会在欢迎语的下方)
             );
             // 注入信息(狠狠灌注!)
             std::fs::write(Path::new("/dev").join(tty), greeting_formatted)?;
