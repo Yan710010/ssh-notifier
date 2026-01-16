@@ -69,7 +69,7 @@ fn main() -> Result<()> {
         let logined_user = config.verify_ssh(&info.fingerprint).unwrap_or_default();
 
         // 发送有人登录的提示
-        notify_send(&logined_user, &info);
+        notify_send(&config, &logined_user, &info);
 
         // 显示问候语
         if let Err(e) = greet(&logined_user.greeting, &info) {
@@ -117,19 +117,19 @@ impl SSHInfo {
 }
 
 /// 发送登录提示
-fn notify_send(user: &User, info: &SSHInfo) {
+fn notify_send(config: &Config, user: &User, info: &SSHInfo) {
     if user.no_notify {
         return;
     }
 
     // 格式化消息文本
-    let mut title = "有人连上来了喵?";
+    let mut title = &config.notify_title;
     let mut message = format!(
         "公钥属于 {}\n来自 {}\n登录用户: {}",
         user.name, info.ip, info.user,
     );
     if user.name == "UNKNOWN" {
-        title = "有陌生人连上来了喵！";
+        title = &config.notify_title_for_stranger;
         message.push_str(&format!("\n密钥指纹: {}", info.fingerprint));
     }
     let notify = Command::new("notify-send")

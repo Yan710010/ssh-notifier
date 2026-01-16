@@ -9,9 +9,12 @@ use kdl::KdlDocument;
 use log::info;
 
 // 数据结构定义
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Config {
-    users: Vec<User>,
+    pub notify_title: String,
+    pub notify_title_for_stranger: String,
+    // notify_message: String, // TODO: 使用用户提供的格式化字符串来生成消息？
+    pub users: Vec<User>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +31,15 @@ impl User {
     }
 }
 // 默认值
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            notify_title: "New ssh Connection".into(),
+            notify_title_for_stranger: "UNKNOWN SSH CONNECTION".into(),
+            users: vec![],
+        }
+    }
+}
 impl Default for User {
     fn default() -> Self {
         Self {
@@ -64,52 +76,74 @@ impl Config {
             info!("Configuration not found, creating one");
             let mut file = File::create(config_path)?;
             file.write_all(indoc! {br#"
-                /- username {
-                    fingerprint "SHA256:xxx..." "SHA256:xxx..."
-                    /- no-notify
+                /- notify-title "new ssh connection"
+                /- notify-title-for-stranger "UNKNOWN SSH CONNECTION"
+                users {
+                    /- username {
+                        fingerprint "SHA256:xxx..." "SHA256:xxx..."
+                        /- no-notify
+                    }
                 }
                 "#})?;
             return Ok(Config::default());
         }
+
         // 读取配置文件并解析
         let config = read_to_string(config_path)?;
         let doc: KdlDocument = config.parse()?;
 
-        let mut users: Vec<User> = vec![];
+        let mut conf = Config::default();
         for node in doc.nodes() {
-            let name = node.name().value();
-            let Some(children) = node.children() else {
-                // 不儿这都没有那你定义了个什么
-                continue;
-            };
-            let fpr: Vec<String> = children
-                .nodes()
-                .iter()
-                .filter(|n| n.name().value() == "fingerprint")
-                .map(|n| n.entries())
-                .map(|entries| {
-                    entries
-                        .iter()
-                        .map(|e| e.value().as_string().unwrap_or_default().into())
-                })
-                .flatten()
-                .collect();
-            let no_notify = children.get("no-notify").is_some();
-            let greeting = children
-                .get("greeting")
-                .and_then(|n| n.get(0))
-                .and_then(|arg| arg.as_string())
-                .map(|s| s.into())
-                .unwrap_or_default();
-            users.push(User {
-                name: name.into(),
-                key_fingerprints: fpr,
-                no_notify,
-                greeting,
-            });
+            let nodename = node.name().value();
+            match nodename {
+                "notify-title" => {
+                    if let Some(title) = node.get(0).and_then(|v| v.as_string()) {
+                        conf.notify_title = title.into();
+                    }
+                }
+                "notify-title-for-stranger" => {
+                    if let Some(title) = node.get(0).and_then(|v| v.as_string()) {
+                        conf.notify_title_for_stranger = title.into();
+                    }
+                }
+                &_ => {
+                    for user in node.children().iter().map(|c| c.nodes()).flatten() {
+                        let name = user.name().value();
+                        let Some(children) = user.children() else {
+                            // 不儿这都没有那你定义了个什么
+                            continue;
+                        };
+                        let fpr: Vec<String> = children
+                            .nodes()
+                            .iter()
+                            .filter(|n| n.name().value() == "fingerprint")
+                            .map(|n| n.entries())
+                            .map(|entries| {
+                                entries
+                                    .iter()
+                                    .map(|e| e.value().as_string().unwrap_or_default().into())
+                            })
+                            .flatten()
+                            .collect();
+                        let no_notify = children.get("no-notify").is_some();
+                        let greeting = children
+                            .get("greeting")
+                            .and_then(|n| n.get(0))
+                            .and_then(|arg| arg.as_string())
+                            .map(|s| s.into())
+                            .unwrap_or_default();
+                        conf.users.push(User {
+                            name: name.into(),
+                            key_fingerprints: fpr,
+                            no_notify,
+                            greeting,
+                        });
+                    }
+                }
+            }
         }
         info!("Loaded configuration");
-        return Ok(Config { users: users });
+        return Ok(conf);
     }
 }
 
