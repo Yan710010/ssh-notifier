@@ -1,7 +1,7 @@
 [package]
 name = "ssh-notifier"
 description = "在有人ssh连接到主机时发送提醒和欢迎语"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license-file = "LICENSE"
 
