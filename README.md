@@ -13,6 +13,24 @@
 notify-title "有人连上来了喵?"
 // 当不在users列表的用户连接的时显示消息的标题
 notify-title-for-stranger "有陌生人连上来了喵!"
+// 消息内容(可以替换的字段如下所示)
+notify-message """
+    密钥属于: {name}
+    时间: {time}
+    登录用户: {user}
+    IP: {ip}
+    """
+notify-message-for-stranger """
+    时间: {time}
+    登录用户: {user}
+    IP: {ip}
+    密钥指纹: {fpr}
+    """
+// 用于显示时间的格式
+// 使用 rfc3339 或 rfc2822 指定, 或用类似date的替换符
+// rfc3339: 2026-01-21T14:15:41+08:00
+// rfc2822: Wed, 21 Jan 2026 14:15:41 +0800
+time-format "%Y-%m-%d %H:%M:%S" // 2026-1-21 14:15:41
 
 users {
     // 节点以用户名称为名
