@@ -13,7 +13,9 @@ use log::info;
 pub struct Config {
     pub notify_title: String,
     pub notify_title_for_stranger: String,
-    // notify_message: String, // TODO: 使用用户提供的格式化字符串来生成消息？
+    pub notify_message: String,
+    pub notify_message_for_stranger: String,
+    pub time_format: String,
     pub users: Vec<User>,
 }
 
@@ -37,6 +39,10 @@ impl Default for Config {
             notify_title: "New ssh Connection".into(),
             notify_title_for_stranger: "UNKNOWN SSH CONNECTION".into(),
             users: vec![],
+            notify_message: "User {name} logined {user} at {time}".into(),
+            notify_message_for_stranger: "Someone logined {user} at {time} with fingerprint {fpr}"
+                .into(),
+            time_format: "rfc3339".into(),
         }
     }
 }
@@ -75,16 +81,20 @@ impl Config {
             // 配置不存在, 创建默认配置文件并返回
             info!("Configuration not found, creating one");
             let mut file = File::create(config_path)?;
-            file.write_all(indoc! {br#"
+            file.write_all(indoc! {r#"
                 /- notify-title "new ssh connection"
                 /- notify-title-for-stranger "UNKNOWN SSH CONNECTION"
+                /- notify-message "User {name} logined {user} at {time}"
+                /- notify-message-for-stranger "Someone logined {user} at {time} with fingerprint {fpr}"
+                /- time-format "rfc3339"
                 users {
                     /- username {
                         fingerprint "SHA256:xxx..." "SHA256:xxx..."
                         /- no-notify
+                        /- greeting "Hello!"
                     }
                 }
-                "#})?;
+                "#}.as_bytes())?;
             return Ok(Config::default());
         }
 
@@ -95,18 +105,20 @@ impl Config {
         let mut conf = Config::default();
         for node in doc.nodes() {
             let nodename = node.name().value();
+            let as_first_arg = |field: &mut String| {
+                if let Some(value) = node.get(0).and_then(|v| v.as_string()) {
+                    *field = value.to_string();
+                }
+            };
             match nodename {
-                "notify-title" => {
-                    if let Some(title) = node.get(0).and_then(|v| v.as_string()) {
-                        conf.notify_title = title.into();
-                    }
+                "notify-title" => as_first_arg(&mut conf.notify_title),
+                "notify-title-for-stranger" => as_first_arg(&mut conf.notify_title_for_stranger),
+                "notify-message" => as_first_arg(&mut conf.notify_message),
+                "notify-message-for-stranger" => {
+                    as_first_arg(&mut conf.notify_message_for_stranger)
                 }
-                "notify-title-for-stranger" => {
-                    if let Some(title) = node.get(0).and_then(|v| v.as_string()) {
-                        conf.notify_title_for_stranger = title.into();
-                    }
-                }
-                &_ => {
+                "time-format" => as_first_arg(&mut conf.time_format),
+                "users" => {
                     for user in node.children().iter().map(|c| c.nodes()).flatten() {
                         let name = user.name().value();
                         let Some(children) = user.children() else {
@@ -140,6 +152,7 @@ impl Config {
                         });
                     }
                 }
+                &_ => {}
             }
         }
         info!("Loaded configuration");

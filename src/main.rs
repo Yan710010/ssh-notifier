@@ -73,7 +73,7 @@ fn main() -> Result<()> {
 
         // 显示问候语
         if let Err(e) = greet(&logined_user.greeting, &info) {
-            error!("Error ocurred while greeting: {}", e);
+            warn!("Error ocurred while greeting: {}", e);
         }
     }
     info!("子进程journalctl关闭, 正在退出");
@@ -123,15 +123,33 @@ fn notify_send(config: &Config, user: &User, info: &SSHInfo) {
     }
 
     // 格式化消息文本
-    let mut title = &config.notify_title;
-    let mut message = format!(
-        "公钥属于 {}\n来自 {}\n登录用户: {}",
-        user.name, info.ip, info.user,
-    );
-    if user.name == "UNKNOWN" {
-        title = &config.notify_title_for_stranger;
-        message.push_str(&format!("\n密钥指纹: {}", info.fingerprint));
-    }
+    let (title, message) = if user.name != "UNKNOWN" {
+        (&config.notify_title, config.notify_message.clone())
+    } else {
+        (
+            &config.notify_title_for_stranger,
+            config.notify_message_for_stranger.clone(),
+        )
+    };
+
+    // 替换占位符
+    let message = message
+        .replace("{name}", &user.name)
+        .replace("{ip}", &info.ip)
+        .replace("{user}", &info.user)
+        .replace("{fpr}", &info.fingerprint)
+        .replace("{time}", &{
+            let format = &config.time_format;
+            let time = chrono::Local::now();
+            if format == "rfc3339" {
+                time.to_rfc3339()
+            } else if format == "rfc2822" {
+                time.to_rfc2822()
+            } else {
+                time.format(format).to_string()
+            }
+        });
+
     let notify = Command::new("notify-send")
         .arg("--urgency=critical")
         .arg("--app-name=ssh-notify")
